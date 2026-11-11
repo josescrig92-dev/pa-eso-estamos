@@ -1,36 +1,30 @@
-# Pa Eso Estamos · control de gastos y beneficios
+# Pa Eso Estamos · cuentas de eventos
 
-App web para llevar ingresos y gastos y ver la cuenta de resultados con GOP, EBITDA y ratios.
-Se publica con GitHub Pages y guarda los datos en una hoja de Google Sheets de vuestro Drive.
-En este repositorio solo hay código, ningún dato de la empresa.
+Web para ver las cuentas de la empresa a partir del Excel de presupuestos (una hoja por evento).
 
-## Puesta en marcha (una sola vez)
+**App:** https://josescrig92-dev.github.io/pa-eso-estamos/
 
-### 1. Publicar la web
-En GitHub: **Settings → Pages → Build and deployment → Source: Deploy from a branch**,
-rama `main`, carpeta `/ (root)`, **Save**. En un par de minutos la app estará en
-`https://josescrig92-dev.github.io/pa-eso-estamos/`.
+## Cómo se usa
+1. Abre la app y sube el Excel (`.xlsx`). Si está en Google Drive, descárgalo como Excel; desde el móvil se puede elegir directamente de Drive.
+2. La app lee todas las hojas a la vez y muestra:
+   - **Resumen**: facturación, margen bruto, GOP, EBITDA, cascada hasta el beneficio neto, ratios, mes a mes y eventos a revisar.
+   - **Eventos**: cada hoja con su facturación, coste, margen y partidas. Se puede corregir la fecha, la facturación o el coste, y apartar eventos.
+   - **En qué se gasta**: las partidas (decoración, catering, espacio…) sumadas de todos los eventos.
+   - **Clientes**: facturación y margen por cliente.
+   - **Gastos de estructura**: sueldos, autónomos, gestoría, alquiler… Hay que meterlos una vez para que el GOP y el EBITDA sean reales.
+3. **Descargar informe** genera un Excel con la cuenta de resultados, los eventos y las partidas.
 
-### 2. Crear la hoja de datos
-1. En Google Drive, crea una hoja de cálculo nueva (por ejemplo "Pa Eso Estamos - Movimientos").
-2. Menú **Extensiones → Apps Script**. Borra lo que haya y pega el contenido de [`apps-script/Code.gs`](apps-script/Code.gs).
-3. Cambia la contraseña de la línea `const CLAVE = "cambia-esta-clave";` por una vuestra.
-4. **Implementar → Nueva implementación → Aplicación web**. Ejecutar como: **Yo**. Quién tiene acceso: **Cualquier usuario**. Autoriza cuando lo pida.
-5. Copia la dirección que termina en `/exec`.
+El archivo no se sube a ningún servidor: se lee en el navegador. Las correcciones y los gastos de estructura se guardan en ese navegador.
 
-### 3. Conectar la app
-Abre la app, pestaña **Ajustes**, pega la dirección y escribe la contraseña. Se recuerda en ese dispositivo.
-Para no tener que pegar la dirección en cada dispositivo, escríbela en [`config.js`](config.js).
-
-## Cómo se guardan los datos
-- Cada movimiento es una fila de la pestaña `Movimientos` de la hoja: ID, Fecha, Línea, Categoría, Concepto, Importe, Ejemplo.
-- Se puede escribir directamente en la hoja: deja la columna ID vacía y la app la rellena. La columna Línea debe ser una de:
-  Ingresos, Coste de ventas, Personal, Gastos operativos, Gastos fijos, Amortizaciones, Gastos financieros, Impuesto sobre beneficios.
-- Los importes van en positivo y sin IVA.
-- Quien tenga la dirección del script y la contraseña puede leer y cambiar los datos. Si cambias la contraseña, hay que volver a implementar el script (Implementar → Gestionar implementaciones → editar → Nueva versión).
+## Cómo lee cada hoja
+- Busca la fila de títulos que empieza por **Concepto**.
+- **Coste**: la columna *Importe* o *Coste*. Usa la fila **TOTAL**; si da error (#VALUE!, #REF!), suma las partidas numeradas (1., 2., …).
+- **Facturación**: la fila **Presupuesto** si tiene cifra; si no, el total de la última columna *Precio para cliente* con número.
+- **Fecha**: del nombre de la hoja (p. ej. "Benefit 28 ene."). El año sale del nombre del archivo o del título.
+- Se apartan de las cuentas las hojas ocultas, las que empiezan por "Copia de" y las que no tienen tabla de presupuesto.
 
 ## Cálculos
-- Margen bruto = ingresos − coste de ventas
+- Margen bruto = facturación − coste de los eventos
 - GOP = margen bruto − personal − gastos operativos
 - EBITDA = GOP − gastos fijos (alquiler, seguros, tributos)
 - EBIT = EBITDA − amortizaciones
