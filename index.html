@@ -140,6 +140,8 @@ input.date{width:140px;padding:4px 6px}
     </div>
     <div class="tools" id="tools" hidden>
       <label class="f" for="selMes">Periodo<select id="selMes"></select></label>
+      <button type="button" class="primary" id="btnDriveAct" hidden>Actualizar desde Drive</button>
+      <button type="button" id="btnDrive2" hidden>Abrir desde Google Drive</button>
       <button type="button" id="btnOtro">Subir otro Excel</button>
       <button type="button" id="btnExport">Descargar informe</button>
     </div>
@@ -152,10 +154,11 @@ input.date{width:140px;padding:4px 6px}
     <h2>Sube vuestro Excel de presupuestos</h2>
     <p>Lee todas las hojas de una vez (una hoja por evento) y calcula la facturación, el coste, el margen de cada evento, el GOP y el EBITDA. El archivo no sale de tu ordenador o móvil.</p>
     <div class="row" style="justify-content:center">
-      <button type="button" class="primary" id="btnFile">Elegir archivo</button>
+      <button type="button" class="primary" id="btnDrive" hidden>Abrir desde Google Drive</button>
+      <button type="button" id="btnFile">Elegir archivo del ordenador</button>
       <span class="small muted">o arrástralo aquí</span>
     </div>
-    <ul><li>Todas las hojas a la vez</li><li>Totales con error recalculados</li><li>Hojas ocultas y copias apartadas</li><li>Desde el móvil se puede elegir de Google Drive</li></ul>
+    <ul><li>Todas las hojas a la vez</li><li>Totales con error recalculados</li><li>Hojas ocultas y copias apartadas</li><li>Directo desde Google Drive</li></ul>
     <p class="small" id="dropMsg"></p>
   </section>
 
@@ -235,6 +238,8 @@ input.date{width:140px;padding:4px 6px}
 
 <script src="vendor/xlsx.full.min.js"></script>
 <script src="parser.js"></script>
+<script src="config.js"></script>
+<script src="drive.js"></script>
 <script>
 (function(){
 "use strict";
@@ -320,24 +325,41 @@ var FILAS=[
  {k:"neto",n:"Beneficio neto",t:"sub"}];
 
 /* ---------- lectura del Excel ---------- */
+function procesar(nombre,buf,origen){
+  try{
+    var wb=XLSX.read(buf,{type:"array",cellDates:false});
+    var res=PEE_parse.libro(wb,XLSX,nombre);
+    var ok=res.eventos.filter(function(e){return!e.noReconocida});
+    if(!ok.length){$("dropMsg").textContent="Ninguna hoja tiene la tabla de presupuesto (columna Concepto e Importe). Revisa que sea el Excel de presupuestos.";toast("Ese archivo no parece el Excel de presupuestos");return false}
+    res.origen=origen||null;
+    S.data=res;save("data",res);S.mes=0;$("selMes").value="0";
+    location.hash="resumen";route();
+    toast(res.eventos.length+" hojas leídas, "+res.eventos.filter(function(e){return e.incluir}).length+" eventos en las cuentas");
+    return true;
+  }catch(err){$("dropMsg").textContent="No se ha podido leer el archivo. Comprueba que es un Excel (.xlsx).";toast("No se ha podido leer el archivo");return false}
+}
 function leer(file){
   if(!file)return;
   $("dropMsg").textContent="Leyendo "+file.name+"…";
   var r=new FileReader();
   r.onerror=function(){$("dropMsg").textContent="No se ha podido abrir el archivo."};
-  r.onload=function(){
-    try{
-      var wb=XLSX.read(r.result,{type:"array",cellDates:false});
-      var res=PEE_parse.libro(wb,XLSX,file.name);
-      var ok=res.eventos.filter(function(e){return!e.noReconocida});
-      if(!ok.length){$("dropMsg").textContent="Ninguna hoja tiene la tabla de presupuesto (columna Concepto e Importe). Revisa que sea el Excel de presupuestos.";return}
-      S.data=res;save("data",res);S.mes=0;$("selMes").value="0";
-      location.hash="resumen";route();
-      toast(res.eventos.length+" hojas leídas, "+res.eventos.filter(function(e){return e.incluir}).length+" eventos en las cuentas");
-    }catch(err){$("dropMsg").textContent="No se ha podido leer el archivo. Si es una hoja de Google, descárgala como Microsoft Excel (.xlsx).";}
-  };
+  r.onload=function(){procesar(file.name,r.result,null)};
   r.readAsArrayBuffer(file);
 }
+function desdeDrive(p,btn){
+  var txt=btn.textContent;btn.disabled=true;btn.textContent="Abriendo Drive…";$("dropMsg").textContent="";
+  return p.then(function(f){
+    if(!f)return;
+    procesar(f.nombre,f.datos,{tipo:"drive",id:f.id,modificado:f.modificado});
+  },function(e){var m=(e&&e.message)||"No se ha podido abrir Google Drive.";$("dropMsg").textContent=m;toast(m)})
+  .then(function(){btn.disabled=false;btn.textContent=txt});
+}
+if(window.PEE_drive&&PEE_drive.activo()){
+  $("btnDrive").hidden=false;$("btnDrive2").hidden=false;
+  $("btnDrive").addEventListener("click",function(){desdeDrive(PEE_drive.abrir(),this)});
+  $("btnDrive2").addEventListener("click",function(){desdeDrive(PEE_drive.abrir(),this)});
+  $("btnDriveAct").addEventListener("click",function(){var o=S.data&&S.data.origen;if(o&&o.id)desdeDrive(PEE_drive.actualizar(o.id),this)});
+}else{$("btnFile").classList.add("primary")}
 $("btnFile").addEventListener("click",function(){$("file").click()});
 $("btnOtro").addEventListener("click",function(){$("file").click()});
 $("file").addEventListener("change",function(){leer(this.files[0]);this.value=""});
@@ -361,7 +383,10 @@ function render(){
   var all=eventos();
   $("fName").textContent=S.data.archivo||"Excel";
   $("fInfo").textContent=S.data.eventos.length+" hojas, "+all.filter(function(e){return e.incluir}).length+" eventos en las cuentas";
-  $("fDate").textContent="Leído el "+new Date(S.data.leido).toLocaleString("es-ES",{day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"});
+  var o=S.data.origen,fmt={day:"numeric",month:"long",hour:"2-digit",minute:"2-digit"};
+  $("fDate").textContent=(o&&o.tipo==="drive"?"Google Drive · modificado el "+new Date(o.modificado).toLocaleString("es-ES",fmt)+" · ":"")+"Leído el "+new Date(S.data.leido).toLocaleString("es-ES",fmt);
+  $("btnDriveAct").hidden=!(o&&o.tipo==="drive"&&window.PEE_drive&&PEE_drive.activo());
+  $("btnDrive2").hidden=!$("btnDriveAct").hidden||!(window.PEE_drive&&PEE_drive.activo());
   if(S.tab==="resumen")rResumen(all);
   else if(S.tab==="eventos")rEventos(all);
   else if(S.tab==="partidas")rPartidas(all);

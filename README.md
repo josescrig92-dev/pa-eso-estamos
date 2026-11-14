@@ -5,7 +5,7 @@ Web para ver las cuentas de la empresa a partir del Excel de presupuestos (una h
 **App:** https://josescrig92-dev.github.io/pa-eso-estamos/
 
 ## Cómo se usa
-1. Abre la app y sube el Excel (`.xlsx`). Si está en Google Drive, descárgalo como Excel; desde el móvil se puede elegir directamente de Drive.
+1. Abre la app y pulsa **Abrir desde Google Drive** (o sube el `.xlsx` desde el ordenador). Después, **Actualizar desde Drive** vuelve a leer el mismo archivo con los últimos cambios.
 2. La app lee todas las hojas a la vez y muestra:
    - **Resumen**: facturación, margen bruto, GOP, EBITDA, cascada hasta el beneficio neto, ratios, mes a mes y eventos a revisar.
    - **Eventos**: cada hoja con su facturación, coste, margen y partidas. Se puede corregir la fecha, la facturación o el coste, y apartar eventos.
@@ -29,3 +29,13 @@ El archivo no se sube a ningún servidor: se lee en el navegador. Las correccion
 - EBITDA = GOP − gastos fijos (alquiler, seguros, tributos)
 - EBIT = EBITDA − amortizaciones
 - Beneficio neto = EBIT − gastos financieros − impuesto sobre beneficios
+
+## Conexión con Google Drive (una sola vez)
+1. Entra en https://console.cloud.google.com/ y crea un proyecto ("Pa Eso Estamos").
+2. **APIs y servicios → Biblioteca**: activa **Google Drive API** y **Google Picker API**.
+3. **Pantalla de consentimiento de OAuth**: tipo *Externo* (o *Interno* si usáis Google Workspace), nombre de la app y vuestro correo. Si es *Externo*, añade como **usuarios de prueba** los correos de Google de quienes vayan a usar la app.
+4. **Credenciales → Crear credenciales → ID de cliente de OAuth**, tipo *Aplicación web*. En **Orígenes de JavaScript autorizados** pon `https://josescrig92-dev.github.io`.
+5. **Credenciales → Crear credenciales → Clave de API**. Restríngela a *Sitios web* `https://josescrig92-dev.github.io/*` y a la API *Google Picker API*.
+6. Pon el ID de cliente y la clave de API en [`config.js`](config.js). No son secretos: Google los da para usarlos en una web.
+
+La app pide el permiso mínimo de Drive (`drive.file`): solo puede leer los archivos que cada persona elige en el selector, nada más del Drive.
