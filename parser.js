@@ -204,6 +204,7 @@
     var oculto = {};
     ((wb.Workbook || {}).Sheets || []).forEach(function (s) { if (s.Hidden) oculto[s.name] = true; });
     wb.SheetNames.forEach(function (n) {
+      if (n === HOJA_AJUSTES) return;
       var filas = XLSX.utils.sheet_to_json(wb.Sheets[n], { header: 1, raw: true, defval: "" });
       var a = (n + " " + textoArriba(filas)).match(RE_ANIO);
       eventos.push(hoja(n, filas, a ? a[0] : (anio || String(new Date().getFullYear())), !!oculto[n]));
@@ -211,7 +212,8 @@
     return { archivo: nombreArchivo || "", anio: anio || "", eventos: eventos, leido: new Date().toISOString() };
   }
 
-  var api = { libro: libro, hoja: hoja, familia: familia, fecha: fecha, num: num };
+  var HOJA_AJUSTES = "Ajustes app";
+  var api = { HOJA_AJUSTES: HOJA_AJUSTES, libro: libro, hoja: hoja, familia: familia, fecha: fecha, num: num };
   if (typeof module !== "undefined" && module.exports) module.exports = api;
   else root.PEE_parse = api;
 })(this);

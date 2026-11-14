@@ -76,6 +76,7 @@ nav.tabs a[aria-current="page"]{color:var(--ink);border-bottom-color:var(--accen
 .note{border-radius:10px;padding:12px 14px;font-size:.9rem;display:flex;gap:10px 16px;flex-wrap:wrap;align-items:center;justify-content:space-between}
 .note.warn{background:var(--warm-soft)}
 .note.bad{background:var(--bad-soft)}
+.note.ok{background:var(--accent-soft);padding:8px 14px}
 
 .casc{display:flex;flex-direction:column}
 .casc .r{display:grid;grid-template-columns:minmax(0,1.35fr) minmax(40px,1fr) auto 54px;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid var(--line)}
@@ -165,6 +166,7 @@ input.date{width:140px;padding:4px 6px}
   <!-- APP -->
   <div id="app" hidden style="display:flex;flex-direction:column;gap:20px">
     <div class="filebar"><span>Archivo: <b id="fName"></b> · <span id="fInfo"></span></span><span id="fDate"></span></div>
+    <div id="sync" class="note" hidden><span id="syncTxt"></span><button type="button" id="btnSync" hidden>Guardar en Drive</button></div>
     <nav class="tabs" aria-label="Vistas">
       <a href="#resumen" data-tab="resumen">Resumen</a>
       <a href="#eventos" data-tab="eventos">Eventos</a>
@@ -265,6 +267,63 @@ function load(k,def){try{var v=localStorage.getItem("pee2_"+k);return v?JSON.par
 function save(k,v){try{localStorage.setItem("pee2_"+k,JSON.stringify(v))}catch(e){}}
 S.data=load("data",null);S.ov=load("ov",{});S.estr=load("estr",null);S.meses=load("meses",12);
 if(!S.estr){S.estr={};ESTR.forEach(function(g){S.estr[g.id]=g.ej.map(function(n){return{n:n,v:""}})})}
+/* ---------- ajustes compartidos en el Excel de Drive ---------- */
+var GSHEET="application/vnd.google-apps.spreadsheet";
+function enDrive(o){return!!(o&&o.tipo==="drive"&&o.mime===GSHEET&&window.PEE_drive&&PEE_drive.activo())}
+function guardarLocal(){save("ov",S.ov);save("estr",S.estr);save("meses",S.meses)}
+function ajustesAFilas(){
+  var f=[["Ajustes de la app de cuentas (https://josescrig92-dev.github.io/pa-eso-estamos/). Los escribe la app: mejor cambiarlos desde allí."],[],
+    ["GASTOS DE ESTRUCTURA"],["Tipo","Concepto","Importe al mes (€)"]];
+  ESTR.forEach(function(g){(S.estr[g.id]||[]).forEach(function(l){if(l.n||l.v!=="")f.push([g.n,l.n,(function(){var v=PEE_parse.num(l.v);return isNaN(v)?String(l.v):v})()])})});
+  f.push([],["MESES QUE CUENTA EL AÑO",+S.meses||12],[],["CORRECCIONES DE EVENTOS"],["Hoja","En las cuentas","Fecha","Facturación (€)","Coste (€)"]);
+  Object.keys(S.ov).sort().forEach(function(h){var o=S.ov[h];
+    f.push([h,o.incluir===undefined?"":(o.incluir?"Sí":"No"),o.fecha===undefined?"":(o.fecha||"(sin fecha)"),o.ing===undefined||o.ing===""?"":+o.ing,o.coste===undefined||o.coste===""?"":+o.coste])});
+  f.push([],["Actualizado el "+new Date().toLocaleString("es-ES")]);
+  return f;
+}
+function ajustesDeLibro(wb){
+  var ws=wb.Sheets[PEE_parse.HOJA_AJUSTES];if(!ws)return null;
+  var filas=XLSX.utils.sheet_to_json(ws,{header:1,raw:true,defval:""}),sec="",estr={},ov={},meses=12,porNombre={};
+  ESTR.forEach(function(g){estr[g.id]=[];porNombre[g.n.toLowerCase()]=g.id});
+  filas.forEach(function(r){
+    var a=String(r[0]).trim(),au=a.toUpperCase();
+    if(au==="GASTOS DE ESTRUCTURA"){sec="e";return}
+    if(au==="CORRECCIONES DE EVENTOS"){sec="c";return}
+    if(au==="MESES QUE CUENTA EL AÑO"){var m=parseInt(r[1],10);if(m>=1&&m<=12)meses=m;sec="";return}
+    if(!a||/^(tipo|hoja)$/i.test(a)||/^actualizado el/i.test(a))return;
+    if(sec==="e"){var g=porNombre[a.toLowerCase()];if(g)estr[g].push({n:String(r[1]||""),v:r[2]===""?"":String(r[2]).replace(".",",")})}
+    else if(sec==="c"){var o={},inc=String(r[1]).trim().toLowerCase(),fe=String(r[2]).trim();
+      if(inc)o.incluir=/^s/.test(inc);
+      if(fe)o.fecha=fe==="(sin fecha)"?"":fe;
+      if(r[3]!==""&&!isNaN(PEE_parse.num(r[3])))o.ing=PEE_parse.num(r[3]);
+      if(r[4]!==""&&!isNaN(PEE_parse.num(r[4])))o.coste=PEE_parse.num(r[4]);
+      if(Object.keys(o).length)ov[a]=o}
+  });
+  return{estr:estr,ov:ov,meses:meses};
+}
+function sync(tipo,txt,boton){var el=$("sync");el.hidden=!txt;el.className="note "+(tipo||"");$("syncTxt").textContent=txt||"";$("btnSync").hidden=!boton}
+var syncT=0;
+function cambiado(){
+  guardarLocal();
+  if(!S.data||!enDrive(S.data.origen))return;
+  S.pendiente=true;clearTimeout(syncT);
+  if(!PEE_drive.conPermiso()){sync("warn","Hay cambios sin guardar en el Excel de Drive.",true);return}
+  sync("","Guardando en el Excel de Drive…");
+  syncT=setTimeout(function(){subirAjustes(false)},1200);
+}
+function subirAjustes(desdeClic,msg){
+  if(!S.data||!enDrive(S.data.origen)||!S.pendiente)return Promise.resolve();
+  if(!desdeClic&&!PEE_drive.conPermiso()){sync("warn","Hay cambios sin guardar en el Excel de Drive.",true);return Promise.resolve()}
+  S.pendiente=false;
+  return PEE_drive.guardarAjustes(S.data.origen.id,PEE_parse.HOJA_AJUSTES,ajustesAFilas()).then(function(){
+    sync("ok",msg||"Guardado en la pestaña «"+PEE_parse.HOJA_AJUSTES+"» del Excel de Drive.");
+  },function(e){
+    S.pendiente=true;var m=e&&e.message;
+    if(m==="sheets_api")sync("bad","No se puede escribir en el Excel: falta activar la «Google Sheets API» en el proyecto de Google Cloud. Los cambios quedan guardados en este navegador.",true);
+    else if(m==="sin_permiso")sync("bad","Tu cuenta de Google no puede editar este Excel. Pide permiso de edición. Los cambios quedan guardados en este navegador.",false);
+    else sync("warn","No se han podido guardar los cambios en Drive. Siguen guardados en este navegador.",true);
+  });
+}
 function toast(t){var el=$("toast");el.textContent=t;el.hidden=false;clearTimeout(toast.t);toast.t=setTimeout(function(){el.hidden=true},3500)}
 
 /* ---------- datos derivados ---------- */
@@ -332,6 +391,11 @@ function procesar(nombre,buf,origen){
     var ok=res.eventos.filter(function(e){return!e.noReconocida});
     if(!ok.length){$("dropMsg").textContent="Ninguna hoja tiene la tabla de presupuesto (columna Concepto e Importe). Revisa que sea el Excel de presupuestos.";toast("Ese archivo no parece el Excel de presupuestos");return false}
     res.origen=origen||null;
+    if(enDrive(res.origen)){
+      var aj=ajustesDeLibro(wb);
+      if(aj){S.estr=aj.estr;S.ov=aj.ov;S.meses=aj.meses;guardarLocal();sync("ok","Ajustes cargados de la pestaña «"+PEE_parse.HOJA_AJUSTES+"» del Excel. Los cambios se guardan ahí para todas.")}
+      else{S.pendiente=true;setTimeout(function(){subirAjustes(false,"Se ha creado la pestaña «"+PEE_parse.HOJA_AJUSTES+"» en el Excel con los ajustes.")},0)}
+    }else sync("","");
     S.data=res;save("data",res);S.mes=0;$("selMes").value="0";
     location.hash="resumen";route();
     toast(res.eventos.length+" hojas leídas, "+res.eventos.filter(function(e){return e.incluir}).length+" eventos en las cuentas");
@@ -350,7 +414,7 @@ function desdeDrive(p,btn){
   var txt=btn.textContent;btn.disabled=true;btn.textContent="Abriendo Drive…";$("dropMsg").textContent="";
   return p.then(function(f){
     if(!f)return;
-    procesar(f.nombre,f.datos,{tipo:"drive",id:f.id,modificado:f.modificado});
+    procesar(f.nombre,f.datos,{tipo:"drive",id:f.id,modificado:f.modificado,mime:f.tipo});
   },function(e){var m=(e&&e.message)||"No se ha podido abrir Google Drive.";$("dropMsg").textContent=m;toast(m)})
   .then(function(){btn.disabled=false;btn.textContent=txt});
 }
@@ -499,13 +563,13 @@ function detalle(e){
     e.partidas.map(function(p){return"<tr><td>"+esc(p.nombre)+'</td><td><span class="chip">'+esc(p.familia)+'</span></td><td class="r num">'+e0(p.coste)+'</td><td class="r num">'+(p.precio?e0(p.precio):"–")+'</td><td class="r num">'+pct(p.coste,e.costeAuto)+"</td></tr>"}).join("")+
     "</table></div>"+(cambios.length?'<p class="small muted" style="margin-top:8px">Has cambiado datos de esta hoja. Valores originales: '+cambios.join(", ")+".</p>":"");
 }
-function setOv(hoja,k,v){var o=S.ov[hoja]||{};o[k]=v;S.ov[hoja]=o;save("ov",S.ov)}
+function setOv(hoja,k,v){var o=S.ov[hoja]||{};o[k]=v;S.ov[hoja]=o;cambiado()}
 $("evTable").addEventListener("click",function(ev){
   var t=ev.target;
   if(t.dataset.sort){S.sort.d=S.sort.k===t.dataset.sort?-S.sort.d:1;S.sort.k=t.dataset.sort;render();return}
   var b=t.closest("button");if(!b)return;
   if(b.dataset.open!==undefined){S.open[b.dataset.open]=!S.open[b.dataset.open];render()}
-  else if(b.dataset.reset!==undefined){delete S.ov[b.dataset.reset];save("ov",S.ov);render();toast("Se vuelven a usar los datos del Excel")}
+  else if(b.dataset.reset!==undefined){delete S.ov[b.dataset.reset];cambiado();render();toast("Se vuelven a usar los datos del Excel")}
 });
 $("evTable").addEventListener("change",function(ev){
   var t=ev.target,d=t.dataset;
@@ -551,11 +615,11 @@ function rEstructura(){
       ls.map(function(l,i){return'<div class="ln"><input type="text" data-g="'+g.id+'" data-i="'+i+'" data-f="n" value="'+esc(l.n)+'" placeholder="Concepto" aria-label="Concepto"><input type="text" inputmode="decimal" class="num" style="text-align:right" data-g="'+g.id+'" data-i="'+i+'" data-f="v" value="'+esc(l.v)+'" placeholder="€ al mes" aria-label="Importe al mes"><button type="button" class="link" data-del="'+g.id+'" data-i="'+i+'" aria-label="Quitar">✕</button></div>'}).join("")+
       '<div><button type="button" data-add="'+g.id+'">Añadir línea</button></div></div>'}).join("");
 }
-$("estr").addEventListener("change",function(ev){var d=ev.target.dataset;if(!d.g)return;S.estr[d.g][+d.i][d.f]=ev.target.value;save("estr",S.estr);rEstructura()});
+$("estr").addEventListener("change",function(ev){var d=ev.target.dataset;if(!d.g)return;S.estr[d.g][+d.i][d.f]=ev.target.value;cambiado();rEstructura()});
 $("estr").addEventListener("click",function(ev){var b=ev.target.closest("button");if(!b)return;
-  if(b.dataset.add){S.estr[b.dataset.add].push({n:"",v:""});save("estr",S.estr);rEstructura();var ins=document.querySelectorAll('[data-g="'+b.dataset.add+'"][data-f="n"]');if(ins.length)ins[ins.length-1].focus()}
-  else if(b.dataset.del){S.estr[b.dataset.del].splice(+b.dataset.i,1);save("estr",S.estr);rEstructura()}});
-$("meses").addEventListener("change",function(){var v=Math.max(1,Math.min(12,parseInt(this.value,10)||12));S.meses=v;save("meses",v);rEstructura()});
+  if(b.dataset.add){S.estr[b.dataset.add].push({n:"",v:""});cambiado();rEstructura();var ins=document.querySelectorAll('[data-g="'+b.dataset.add+'"][data-f="n"]');if(ins.length)ins[ins.length-1].focus()}
+  else if(b.dataset.del){S.estr[b.dataset.del].splice(+b.dataset.i,1);cambiado();rEstructura()}});
+$("meses").addEventListener("change",function(){var v=Math.max(1,Math.min(12,parseInt(this.value,10)||12));S.meses=v;cambiado();rEstructura()});
 
 /* ---------- informe ---------- */
 $("btnExport").addEventListener("click",function(){
@@ -570,6 +634,8 @@ $("btnExport").addEventListener("click",function(){
 /* ---------- arranque ---------- */
 $("selMes").innerHTML='<option value="0">Todo el año</option>'+MESES_L.map(function(m,i){return'<option value="'+(i+1)+'">'+m+"</option>"}).join("");
 $("selMes").addEventListener("change",function(){S.mes=+this.value;render()});
+$("btnSync").addEventListener("click",function(){S.pendiente=true;subirAjustes(true)});
+window.addEventListener("beforeunload",function(e){if(S.pendiente&&S.data&&enDrive(S.data.origen)){e.preventDefault();e.returnValue=""}});
 route();
 })();
 </script>

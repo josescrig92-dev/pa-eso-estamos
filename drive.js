@@ -79,12 +79,44 @@
         ? base + "/export?mimeType=" + encodeURIComponent("application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
         : base + "?alt=media&supportsAllDrives=true";
       return api(url, tk).then(function (r) { return r.arrayBuffer(); }).then(function (buf) {
-        return { id: f.id, nombre: m.name, modificado: m.modifiedTime, datos: buf };
+        return { id: f.id, nombre: m.name, modificado: m.modifiedTime, tipo: m.mimeType, datos: buf };
       });
     });
   }
+  // Escribe la pestaña de ajustes de una hoja de Google (la crea si no existe).
+  function escribirPestana(id, titulo, filas, tk) {
+    var base = "https://sheets.googleapis.com/v4/spreadsheets/" + encodeURIComponent(id);
+    var rango = encodeURIComponent("'" + titulo + "'!A1:Z2000");
+    var json = function (metodo, url, cuerpo) {
+      return fetch(url, { method: metodo, headers: { Authorization: "Bearer " + tk, "Content-Type": "application/json" }, body: cuerpo ? JSON.stringify(cuerpo) : undefined })
+        .then(function (r) {
+          if (r.status === 401) { token = null; throw new Error("permiso"); }
+          if (r.status === 403) return r.json().catch(function () { return {}; }).then(function (j) {
+            var m = (j.error && j.error.message) || "";
+            throw new Error(/has not been used|is disabled|SERVICE_DISABLED/i.test(m) ? "sheets_api" : "sin_permiso");
+          });
+          if (!r.ok) throw new Error("Google Sheets ha respondido con un error (" + r.status + ").");
+          return r.json();
+        });
+    };
+    return json("GET", base + "?fields=sheets.properties.title").then(function (d) {
+      var existe = (d.sheets || []).some(function (s) { return s.properties.title === titulo; });
+      return existe ? null : json("POST", base + ":batchUpdate", { requests: [{ addSheet: { properties: { title: titulo, tabColor: { red: 0.06, green: 0.42, blue: 0.36 } } } }] });
+    }).then(function () {
+      return json("POST", base + "/values/" + rango + ":clear", {});
+    }).then(function () {
+      return json("PUT", base + "/values/" + encodeURIComponent("'" + titulo + "'!A1") + "?valueInputOption=RAW", { values: filas });
+    });
+  }
+
   window.PEE_drive = {
     activo: activo,
+    // ¿Hay permiso de Google vigente sin tener que pedirlo con un clic?
+    conPermiso: function () { return !!(token && Date.now() < caduca - 60000); },
+    // Guarda la pestaña de ajustes. Si el permiso ha caducado, hay que llamarla desde un clic.
+    guardarAjustes: function (id, titulo, filas) {
+      return preparar().then(pedirToken).then(function (tk) { return escribirPestana(id, titulo, filas, tk); });
+    },
     // Abre el selector de Drive y devuelve el archivo elegido ya descargado (o null si se cancela).
     abrir: function () {
       return preparar().then(pedirToken).then(function (tk) {
